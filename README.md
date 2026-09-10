@@ -132,3 +132,4 @@ status on the harder items:
 - Validate file uploads server-side beyond MIME-type (magic-byte check).
 - Add input validation (e.g. `zod` or `joi`) on all controllers — this MVP
   does minimal manual checks.
+# FoodBridge
