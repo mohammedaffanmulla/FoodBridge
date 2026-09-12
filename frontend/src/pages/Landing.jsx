@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   UtensilsCrossed, Home, PartyPopper, Building2, ChefHat, ShoppingBasket,
@@ -6,6 +6,43 @@ import {
   ChevronDown, Sparkles,
 } from "lucide-react";
 import api from "../api/api.js";
+
+// Counts a number up from 0 to its target once it scrolls into view, instead
+// of just appearing — a small touch that makes the impact stats feel alive
+// rather than like static placeholder text.
+function useCountUp(target, duration = 1200) {
+  const [value, setValue] = useState(0);
+  const ref = useRef(null);
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (target == null || Number.isNaN(Number(target))) return;
+    const el = ref.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !started.current) {
+          started.current = true;
+          const start = performance.now();
+          const from = 0;
+          const to = Number(target);
+          const step = (now) => {
+            const progress = Math.min((now - start) / duration, 1);
+            setValue(Math.round(from + (to - from) * progress));
+            if (progress < 1) requestAnimationFrame(step);
+          };
+          requestAnimationFrame(step);
+        }
+      },
+      { threshold: 0.3 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [target, duration]);
+
+  return [value, ref];
+}
 
 const donorSources = [
   { icon: UtensilsCrossed, label: "Restaurants & cafes", detail: "Daily unsold or over-prepped food" },
@@ -70,59 +107,106 @@ export default function Landing() {
     api.get("/admin/stats").then(({ data }) => setStats(data)).catch(() => setStats(null));
   }, []);
 
+  const [mealsVal, mealsRef] = useCountUp(stats?.mealsSaved);
+  const [co2Val, co2Ref] = useCountUp(stats?.co2SavedKg);
+  const [ngoVal, ngoRef] = useCountUp(stats?.totalVerifiedNGOs);
+  const [donorVal, donorRef] = useCountUp(stats?.totalDonors);
+  const [deliveredVal, deliveredRef] = useCountUp(stats?.deliveredListings);
+
   return (
     <div>
-      {/* Hero */}
-      <section className="max-w-6xl mx-auto px-5 pt-16 pb-16 grid md:grid-cols-[1.2fr_1fr] gap-12 items-center">
-        <div>
-          <p className="text-clay font-medium mb-3 flex items-center gap-2">
-            <Sparkles size={16} /> Surplus food, redirected — not wasted
-          </p>
-          <h1 className="text-4xl md:text-5xl leading-tight font-semibold text-banyan dark:text-mango">
-            Any extra food, from anywhere, can be someone's next meal.
-          </h1>
-          <p className="mt-5 text-ink-light dark:text-husk/70 max-w-lg">
-            Restaurants, home kitchens, canteens, caterers, weddings and
-            everyday individuals all have one thing in common: sometimes
-            there's more food than people to eat it. FoodBridge finds the
-            nearest verified NGO, shelter or volunteer to pick it up before it
-            goes to waste — no matter where it came from.
-          </p>
-          <div className="mt-8 flex flex-wrap gap-4">
-            <Link to="/register?role=donor" className="px-6 py-3 rounded-full bg-banyan text-husk font-medium hover:bg-banyan-dark transition">
-              Donate surplus food
-            </Link>
-            <Link to="/register?role=ngo" className="px-6 py-3 rounded-full border border-banyan text-banyan dark:text-mango dark:border-mango font-medium hover:bg-banyan/5 transition">
-              Register as NGO / volunteer
-            </Link>
+      {/* Hero — full-bleed food photo behind the headline, not a small inset image */}
+      <section className="relative overflow-hidden">
+        <img
+          src="https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=1600&q=80&auto=format&fit=crop"
+          alt="Hands sharing a meal together"
+          className="absolute inset-0 w-full h-full object-cover"
+          loading="eager"
+        />
+        {/* Dark gradient so white text stays readable over any part of the photo */}
+        <div className="absolute inset-0 bg-gradient-to-r from-ink/90 via-ink/70 to-ink/40 dark:from-ink/95 dark:via-ink/80 dark:to-ink/50" />
+
+        <div className="relative max-w-6xl mx-auto px-5 pt-20 pb-24 grid md:grid-cols-[1.2fr_1fr] gap-12 items-center">
+          <div>
+            <p className="text-mango font-medium mb-3 flex items-center gap-2">
+              <Sparkles size={16} /> Surplus food, redirected — not wasted
+            </p>
+            <h1 className="text-4xl md:text-5xl leading-tight font-semibold text-husk">
+              Any extra food, from anywhere, can be someone's next meal.
+            </h1>
+            <p className="mt-5 text-husk/85 max-w-lg">
+              Restaurants, home kitchens, canteens, caterers, weddings and
+              everyday individuals all have one thing in common: sometimes
+              there's more food than people to eat it. FoodBridge finds the
+              nearest verified NGO, shelter or volunteer to pick it up before it
+              goes to waste — no matter where it came from.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-4">
+              <Link to="/register?role=donor" className="px-6 py-3 rounded-full bg-mango text-ink font-medium hover:bg-mango-dark hover:scale-[1.03] transition">
+                Donate surplus food
+              </Link>
+              <Link to="/register?role=ngo" className="px-6 py-3 rounded-full border border-husk/60 text-husk font-medium hover:bg-husk/10 hover:scale-[1.03] transition">
+                Register as NGO / volunteer
+              </Link>
+            </div>
+          </div>
+
+          {/* Glass-panel stat card, sitting on top of the photo rather than beside it */}
+          <div className="border border-husk/20 rounded-2xl p-8 bg-ink/40 backdrop-blur-md">
+            <p className="text-sm uppercase tracking-wide text-husk/60 mb-1">Since launch</p>
+            <div ref={mealsRef} className="font-display text-6xl text-mango">
+              {stats?.mealsSaved != null ? mealsVal : "—"}
+            </div>
+            <p className="text-husk/80 mb-6">meals put on a plate instead of in a bin</p>
+
+            <div className="grid grid-cols-2 gap-4 text-sm border-t border-husk/15 pt-4">
+              <div ref={co2Ref}>
+                <div className="font-display text-2xl text-husk">{stats?.co2SavedKg != null ? co2Val : "—"}</div>
+                <p className="text-husk/70">kg CO₂e avoided</p>
+              </div>
+              <div ref={ngoRef}>
+                <div className="font-display text-2xl text-husk">{stats?.totalVerifiedNGOs != null ? ngoVal : "—"}</div>
+                <p className="text-husk/70">verified NGO partners</p>
+              </div>
+              <div ref={donorRef}>
+                <div className="font-display text-2xl text-husk">{stats?.totalDonors != null ? donorVal : "—"}</div>
+                <p className="text-husk/70">registered donors</p>
+              </div>
+              <div ref={deliveredRef}>
+                <div className="font-display text-2xl text-husk">{stats?.deliveredListings != null ? deliveredVal : "—"}</div>
+                <p className="text-husk/70">deliveries completed</p>
+              </div>
+            </div>
           </div>
         </div>
+      </section>
 
-        <div className="border-2 border-dashed border-banyan/25 dark:border-mango/25 rounded-2xl p-8 bg-white/40 dark:bg-white/5">
-          <p className="text-sm uppercase tracking-wide text-ink-light dark:text-husk/60 mb-1">Since launch</p>
-          <div className="font-display text-6xl text-mango-dark dark:text-mango">
-            {stats?.mealsSaved ?? "—"}
+      {/* Why this matters — the moral core of the product, not just the mechanics */}
+      <section className="max-w-6xl mx-auto px-5 py-16">
+        <div className="grid md:grid-cols-2 gap-8 items-center bg-banyan/5 dark:bg-mango/5 rounded-2xl p-8 md:p-10">
+          <div>
+            <h2 className="text-2xl font-semibold mb-4 text-banyan dark:text-mango">Why this matters</h2>
+            <p className="text-ink-light dark:text-husk/80 mb-3">
+              Roughly a third of all food produced worldwide is never eaten —
+              while hundreds of millions of people go hungry every day. That's
+              not a supply problem. It's a distance problem: the food and the
+              people who need it are usually only a few kilometers apart, and
+              simply never find out about each other in time.
+            </p>
+            <p className="text-ink-light dark:text-husk/80">
+              Every listing on this platform is a small refusal to accept that
+              gap as normal. A donor choosing to post instead of binning it. A
+              volunteer choosing to make one more stop. A shelter getting a
+              meal they didn't have to cook themselves. None of it is
+              complicated — it just has to actually connect.
+            </p>
           </div>
-          <p className="text-ink-light dark:text-husk/70 mb-6">meals put on a plate instead of in a bin</p>
-
-          <div className="grid grid-cols-2 gap-4 text-sm border-t border-banyan/10 dark:border-husk/10 pt-4">
-            <div>
-              <div className="font-display text-2xl text-banyan dark:text-mango">{stats?.co2SavedKg ?? "—"}</div>
-              <p className="text-ink-light dark:text-husk/70">kg CO₂e avoided</p>
-            </div>
-            <div>
-              <div className="font-display text-2xl text-banyan dark:text-mango">{stats?.totalVerifiedNGOs ?? "—"}</div>
-              <p className="text-ink-light dark:text-husk/70">verified NGO partners</p>
-            </div>
-            <div>
-              <div className="font-display text-2xl text-banyan dark:text-mango">{stats?.totalDonors ?? "—"}</div>
-              <p className="text-ink-light dark:text-husk/70">registered donors</p>
-            </div>
-            <div>
-              <div className="font-display text-2xl text-banyan dark:text-mango">{stats?.deliveredListings ?? "—"}</div>
-              <p className="text-ink-light dark:text-husk/70">deliveries completed</p>
-            </div>
-          </div>
+          <img
+            src="https://images.unsplash.com/photo-1593113630400-ea4288922497?w=800&q=80&auto=format&fit=crop"
+            alt="Volunteers packing boxes of food for donation"
+            className="w-full h-64 md:h-72 object-cover rounded-xl"
+            loading="lazy"
+          />
         </div>
       </section>
 
@@ -135,7 +219,7 @@ export default function Landing() {
         </p>
         <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
           {donorSources.map(({ icon: Icon, label, detail }) => (
-            <div key={label} className="border border-banyan/10 dark:border-husk/10 rounded-xl p-5 flex gap-4 items-start hover:border-mango/40 transition">
+            <div key={label} className="border border-banyan/10 dark:border-husk/10 rounded-xl p-5 flex gap-4 items-start hover:border-mango/40 hover:-translate-y-0.5 hover:shadow-md transition-all">
               <div className="w-10 h-10 rounded-full bg-banyan/10 dark:bg-mango/10 grid place-items-center flex-shrink-0">
                 <Icon size={20} className="text-banyan dark:text-mango" />
               </div>
@@ -157,7 +241,7 @@ export default function Landing() {
         </p>
         <div className="grid sm:grid-cols-2 md:grid-cols-5 gap-4">
           {recipientRouting.map(({ icon: Icon, label, note }) => (
-            <div key={label} className="border border-banyan/10 dark:border-husk/10 rounded-xl p-4 text-center">
+            <div key={label} className="border border-banyan/10 dark:border-husk/10 rounded-xl p-4 text-center hover:border-mango/40 hover:-translate-y-0.5 hover:shadow-md transition-all">
               <div className="w-10 h-10 mx-auto rounded-full bg-mango/15 grid place-items-center mb-3">
                 <Icon size={18} className="text-mango-dark" />
               </div>
@@ -195,7 +279,7 @@ export default function Landing() {
             [Bell, "Expiry alerts", "Countdown notifications so nothing sits past its safe pickup window."],
             [ShieldCheck, "Verified NGOs only", "Every organization accepting donations is reviewed by an admin first."],
           ].map(([Icon, title, body]) => (
-            <div key={title} className="rounded-xl p-5 bg-banyan/5 dark:bg-mango/5">
+            <div key={title} className="rounded-xl p-5 bg-banyan/5 dark:bg-mango/5 hover:bg-banyan/10 dark:hover:bg-mango/10 hover:-translate-y-0.5 transition-all">
               <Icon size={20} className="text-banyan dark:text-mango mb-3" />
               <p className="font-medium">{title}</p>
               <p className="text-sm text-ink-light dark:text-husk/70 mt-1">{body}</p>
@@ -209,7 +293,7 @@ export default function Landing() {
         <h2 className="text-2xl font-semibold mb-8 text-banyan dark:text-mango">From people already using it</h2>
         <div className="grid md:grid-cols-3 gap-6">
           {testimonials.map((t) => (
-            <div key={t.name} className="border border-banyan/10 dark:border-husk/10 rounded-xl p-5">
+            <div key={t.name} className="border border-banyan/10 dark:border-husk/10 rounded-xl p-5 hover:border-mango/40 hover:shadow-md transition-all">
               <p className="text-ink-light dark:text-husk/80 italic">"{t.quote}"</p>
               <p className="mt-4 text-sm font-medium">{t.name}</p>
               <p className="text-xs text-ink-light dark:text-husk/60">{t.role}</p>
@@ -242,14 +326,23 @@ export default function Landing() {
 
       {/* Final CTA */}
       <section className="max-w-6xl mx-auto px-5 pb-20">
-        <div className="rounded-2xl bg-banyan dark:bg-banyan-dark text-husk px-8 py-12 text-center">
-          <h2 className="text-2xl md:text-3xl font-semibold mb-3">Got extra food right now?</h2>
-          <p className="text-husk/80 mb-6 max-w-md mx-auto">
-            It takes under a minute to list — whatever the source, whatever the amount.
-          </p>
-          <Link to="/register?role=donor" className="inline-block px-6 py-3 rounded-full bg-mango text-ink font-medium hover:bg-mango-dark transition">
-            Post a listing
-          </Link>
+        <div className="relative rounded-2xl overflow-hidden text-center px-8 py-16">
+          <img
+            src="https://images.unsplash.com/photo-1488459716781-31db52582fe9?w=1200&q=80&auto=format&fit=crop"
+            alt="Fresh bread ready to be shared"
+            className="absolute inset-0 w-full h-full object-cover"
+            loading="lazy"
+          />
+          <div className="absolute inset-0 bg-banyan/85 dark:bg-banyan-dark/90" />
+          <div className="relative">
+            <h2 className="text-2xl md:text-3xl font-semibold mb-3 text-husk">Got extra food right now?</h2>
+            <p className="text-husk/80 mb-6 max-w-md mx-auto">
+              It takes under a minute to list — whatever the source, whatever the amount.
+            </p>
+            <Link to="/register?role=donor" className="inline-block px-6 py-3 rounded-full bg-mango text-ink font-medium hover:bg-mango-dark hover:scale-[1.03] transition">
+              Post a listing
+            </Link>
+          </div>
         </div>
       </section>
     </div>

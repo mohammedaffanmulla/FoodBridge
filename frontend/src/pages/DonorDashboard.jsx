@@ -32,7 +32,17 @@ export default function DonorDashboard() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError(""); setBusy(true);
+    setError("");
+
+    // A missing lat/lng silently becomes NaN once sent to the server, which
+    // breaks the geospatial "find nearby NGOs" query for this listing forever
+    // — it just never matches anyone. Catch it here instead.
+    if (!form.lat || !form.lng) {
+      setError("Please pin your pickup location — tap \"Use my current location\" below, or the listing won't reach anyone nearby.");
+      return;
+    }
+
+    setBusy(true);
     try {
       const body = new FormData();
       body.append("title", form.title);

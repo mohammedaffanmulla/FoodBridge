@@ -20,8 +20,22 @@ const requestSchema = new mongoose.Schema(
     tracking: {
       volunteer: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
       currentLocation: {
-        type: { type: String, enum: ["Point"], default: "Point" },
-        coordinates: [Number],
+        type: {
+          type: String,
+          enum: ["Point"],
+          // NOTE: no `default` here on purpose. If we default this to "Point"
+          // while coordinates stays undefined, Mongoose/Mongo end up storing
+          // { type: "Point" } with no coordinates, which breaks 2dsphere
+          // geo queries with "Point must be an array or object, instead got
+          // type missing". Only set this field when real coordinates exist.
+        },
+        coordinates: {
+          type: [Number],
+          validate: {
+            validator: (v) => !v || v.length === 2,
+            message: "coordinates must be an array of [lng, lat]",
+          },
+        },
       },
       lastUpdated: Date,
       pickedUpAt: Date,
@@ -34,6 +48,8 @@ const requestSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-requestSchema.index({ "tracking.currentLocation": "2dsphere" });
+// sparse: true so requests without a currentLocation set yet are simply
+// excluded from the geo index instead of breaking it.
+requestSchema.index({ "tracking.currentLocation": "2dsphere" }, { sparse: true });
 
 export default mongoose.model("Request", requestSchema);

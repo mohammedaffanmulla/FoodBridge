@@ -96,9 +96,14 @@ export const createListing = asyncHandler(async (req, res) => {
         body: `${title} (${parsedQuantity.value} ${parsedQuantity.unit}) available for pickup — routed as ${classification.routedTo.replace("_", " ")}.`,
         channel: ["push"],
         relatedListing: listing._id,
+        io: req.io,
       })
     )
   );
+
+  // Broadcast to every connected client so any open NGO/volunteer dashboard
+  // refreshes its nearby list immediately, instead of only on next page load.
+  req.io.emit("food:new", { listingId: listing._id });
 
   res.status(201).json({ listing });
 });
@@ -152,6 +157,11 @@ export const acceptListing = asyncHandler(async (req, res) => {
   listing.timeline.push({ status: "accepted", by: req.user._id });
   await listing.save();
 
+  // Intentionally NOT setting tracking.currentLocation here. It gets set
+  // later via updateTracking() once we actually have real GPS coordinates
+  // from the volunteer's device. Setting a placeholder Point with no
+  // coordinates is what caused the "Point must be an array or object,
+  // instead got type missing" geo-index error.
   const request = await Request.create({
     listing: listing._id,
     requestedBy: req.user._id,
@@ -166,7 +176,12 @@ export const acceptListing = asyncHandler(async (req, res) => {
     body: `${req.user.name} is on the way to pick up "${listing.title}".`,
     channel: ["push", "sms"],
     relatedListing: listing._id,
+    io: req.io,
   });
+
+  // Tell every connected dashboard this listing is no longer available,
+  // so it disappears from other NGOs'/volunteers' lists immediately.
+  req.io.emit("food:updated", { listingId: listing._id, status: "accepted" });
 
   res.json({ listing, request });
 });
@@ -175,19 +190,29 @@ export const acceptListing = asyncHandler(async (req, res) => {
 // @route PATCH /api/food/requests/:requestId/track
 export const updateTracking = asyncHandler(async (req, res) => {
   const { lng, lat } = req.body;
+
+  if (lng == null || lat == null || isNaN(Number(lng)) || isNaN(Number(lat))) {
+    res.status(400);
+    throw new Error("Valid lng and lat are required to update tracking location");
+  }
+
   const request = await Request.findById(req.params.requestId);
   if (!request) {
     res.status(404);
     throw new Error("Request not found");
   }
-  request.tracking.currentLocation = { type: "Point", coordinates: [lng, lat] };
+
+  request.tracking.currentLocation = {
+    type: "Point",
+    coordinates: [Number(lng), Number(lat)],
+  };
   request.tracking.lastUpdated = new Date();
   await request.save();
 
   if (req.io) {
     req.io.to(`listing:${request.listing}`).emit("tracking:update", {
       requestId: request._id,
-      coordinates: [lng, lat],
+      coordinates: [Number(lng), Number(lat)],
     });
   }
 
@@ -206,10 +231,11 @@ export const markPickedUp = asyncHandler(async (req, res) => {
   res.json({ listing });
 });
 
-// @desc  Confirm delivery -> updates donor + NGO impact stats
+// @desc  Confirm delivery -> updates donor + NGO impact stats, and closes the
+// loop with a recipient's open need request if one was selected.
 // @route PATCH /api/food/:id/delivered
 export const markDelivered = asyncHandler(async (req, res) => {
-  const { proofPhoto, peopleFed } = req.body;
+  const { proofPhoto, peopleFed, recipientRequestId } = req.body;
   const listing = await FoodListing.findById(req.params.id);
   if (!listing) {
     res.status(404);
@@ -218,6 +244,30 @@ export const markDelivered = asyncHandler(async (req, res) => {
 
   listing.status = "delivered";
   listing.timeline.push({ status: "delivered", by: req.user._id });
+
+  // This is the piece that was missing entirely: linking a delivered listing
+  // back to the specific recipient (orphanage/shelter/individual) whose
+  // request it fulfills, instead of the recipient side never hearing anything.
+  if (recipientRequestId) {
+    const need = await Request.findById(recipientRequestId);
+    if (need && need.status === "pending") {
+      listing.recipientOrg = need.requestedBy;
+      need.status = "fulfilled";
+      need.listing = listing._id;
+      await need.save();
+
+      await notify({
+        userId: need.requestedBy,
+        type: "request_fulfilled",
+        title: "Your food request was fulfilled",
+        body: `"${listing.title}" has been delivered to cover your request for ${need.peopleToFeed} people.`,
+        channel: ["push", "sms"],
+        relatedListing: listing._id,
+        io: req.io,
+      });
+    }
+  }
+
   await listing.save();
 
   await Request.updateOne(
@@ -243,6 +293,7 @@ export const markDelivered = asyncHandler(async (req, res) => {
     body: `"${listing.title}" was successfully delivered. Thank you for reducing food waste!`,
     channel: ["push", "email"],
     relatedListing: listing._id,
+    io: req.io,
   });
 
   res.json({ listing });
@@ -252,5 +303,22 @@ export const markDelivered = asyncHandler(async (req, res) => {
 // @route GET /api/food/mine
 export const getMyListings = asyncHandler(async (req, res) => {
   const listings = await FoodListing.find({ donor: req.user._id }).sort("-createdAt");
+  res.json({ listings });
+});
+
+// @desc  NGO/volunteer's own in-progress and recent pickups. This is the
+// piece that was missing: getNearbyListings only returns status="available"
+// by default, so the moment a listing is accepted it disappeared from that
+// query and the NGO lost their "mark picked up" / "confirm delivery" path
+// back to it. This endpoint tracks it by who accepted it, not by status.
+// @route GET /api/food/my-pickups
+export const getMyPickups = asyncHandler(async (req, res) => {
+  const listings = await FoodListing.find({
+    acceptedBy: req.user._id,
+    status: { $in: ["accepted", "picked_up", "delivered"] },
+  })
+    .populate("donor", "name donorType phone")
+    .sort("-updatedAt")
+    .limit(50);
   res.json({ listings });
 });

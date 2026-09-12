@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
+import NotificationBell from "./NotificationBell.jsx";
 
 const roleHome = {
   donor: "/donor",
@@ -39,6 +40,8 @@ export default function Navbar() {
           >
             {dark ? "☀" : "☾"}
           </button>
+
+          {user && <NotificationBell />}
 
           {user ? (
             <div className="flex items-center gap-3">

@@ -1,3 +1,4 @@
+import dns from "node:dns";
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -15,6 +16,11 @@ import recipientRoutes from "./routes/recipientRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import ratingRoutes from "./routes/ratingRoutes.js";
 import impactRoutes from "./routes/impactRoutes.js";
+import notificationRoutes from "./routes/notificationRoutes.js";
+
+// Workaround for querySrv ETIMEOUT/ECONNREFUSED errors on some networks when
+// connecting to a mongodb+srv:// Atlas URI. Must run before connectDB().
+dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
 dotenv.config();
 await connectDB();
@@ -45,6 +51,7 @@ app.use("/api/recipients", recipientRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/ratings", ratingRoutes);
 app.use("/api/impact", impactRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

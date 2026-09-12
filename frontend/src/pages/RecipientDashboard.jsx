@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "../api/api.js";
+import { getSocket } from "../api/socket.js";
 
 export default function RecipientDashboard() {
   const [requests, setRequests] = useState([]);
@@ -8,6 +9,20 @@ export default function RecipientDashboard() {
 
   const load = () => api.get("/recipients/requests/mine").then(({ data }) => setRequests(data.requests));
   useEffect(() => { load(); }, []);
+
+  // Without this, a recipient never finds out their request was fulfilled
+  // until they happen to refresh the page — the whole point of connecting
+  // this to the NGO side live is lost otherwise.
+  useEffect(() => {
+    const socket = getSocket();
+    const onUpdated = () => load();
+    socket.on("need:updated", onUpdated);
+    socket.on("notification", onUpdated);
+    return () => {
+      socket.off("need:updated", onUpdated);
+      socket.off("notification", onUpdated);
+    };
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
