@@ -1,135 +1,175 @@
 # FoodBridge
 
-Connects surplus food donors (restaurants, weddings, events, individuals) with
-verified NGOs, shelters and volunteers to redistribute food to people who need
-it — with a rule-based classifier that routes anything unsafe for humans to
-animal-feed or compost partners instead of the bin.
+Connects surplus food donors — restaurants, home kitchens, canteens, caterers,
+weddings, individuals — with verified NGOs, shelters and volunteers who can
+redistribute it, before it goes to waste.
 
-This repo is a working MVP core, not the entire feature list in one shot —
-see **What's stubbed / what's next** below for the honest picture.
+Food that isn't safe for people doesn't just get binned: a classification
+engine routes it to animal-feed partners or compost/waste partners instead.
+
+---
 
 ## Stack
 
-- **Backend:** Node.js + Express, MongoDB (Mongoose), Socket.io for real-time
-  tracking/notifications, JWT + OTP auth.
-- **Frontend:** React + Vite, Tailwind CSS, React Router, Google Maps
-  (`@react-google-maps/api`), Socket.io client, PWA manifest.
+**Frontend** — React 18, Vite, Tailwind CSS, React Router, Axios,
+Socket.io-client, Leaflet + OpenStreetMap (no API key needed), Lucide icons,
+date-fns. PWA-ready with dark mode.
+
+**Backend** — Node.js + Express, MongoDB via Mongoose, Socket.io for real-time
+updates, JWT + OTP auth, bcrypt, Multer (uploads), Cloudinary (optional image
+storage), Twilio (optional SMS).
+
+---
+
+## Setup
+
+### 1. Database
+
+Either run MongoDB locally in Docker (recommended — no IP whitelist hassle):
+
+```bash
+docker run -d --name foodbridge-mongo --restart unless-stopped \
+  -p 27017:27017 -v foodbridge-mongo-data:/data/db mongo:7
+```
+
+…or use a MongoDB Atlas cluster and whitelist your IP under **Network Access**.
+
+### 2. Backend
+
+```bash
+cd backend
+cp .env.example .env
+```
+
+Set `MONGO_URI` in `.env`:
+- Docker/local: `mongodb://localhost:27017/foodbridge`
+- Atlas: your connection string, with `/foodbridge` before the `?`
+
+Everything else (Twilio, SMTP, Cloudinary) is optional — without those keys
+the app logs to console instead of sending real SMS/email/uploads.
+
+```bash
+npm install
+npm run seed     # creates an admin account, prints credentials
+npm run dev      # http://localhost:5000
+```
+
+Default admin: `admin@foodbridge.local` / `ChangeMe123!`
+
+### 3. Frontend
+
+```bash
+cd frontend
+cp .env.example .env    # VITE_API_URL is preset to the backend
+npm install
+npm run dev             # http://localhost:5173
+```
+
+No map API key required — the live map uses OpenStreetMap.
+
+---
+
+## How the flow works
+
+```
+Donor posts listing
+      ↓
+Auto-classified (human-edible / animal feed / compost)
+      ↓
+Nearby verified NGOs + volunteers notified in real time
+      ↓
+NGO or volunteer accepts → marks picked up → confirms delivery
+      ↓
+Donor + NGO impact stats, points and badges update
+```
+
+Running alongside this, **recipients** (orphanages, shelters, individuals)
+post food needs, which appear on the NGO/volunteer dashboard sorted by
+urgency. Marking one fulfilled notifies the recipient and closes that loop.
+
+**Admin** sits outside the flow: NGOs can't accept anything until an admin
+verifies them at `/admin`.
+
+---
+
+## Testing it end to end
+
+1. Log in as admin, keep that tab open.
+2. Register a **donor** — post a listing, pin the pickup location.
+3. Register an **NGO** with a location nearby. Approve it from the admin tab.
+4. Log in as the NGO — the listing should appear live under *Nearby donations*.
+5. Accept → Mark picked up → Confirm delivery.
+6. Check `/leaderboard` and `/impact` — meals, points and food details now appear.
+
+Note: the leaderboard only counts **delivered** listings, so steps 1–5 must
+complete before any numbers show up.
+
+---
 
 ## Project structure
 
 ```
-foodbridge/
-├── backend/
-│   ├── config/db.js
-│   ├── models/            User, FoodListing, Request, Rating, Notification
-│   ├── middleware/         auth, upload (multer), error handler
-│   ├── controllers/        auth, food, recipient, admin, rating, impact
-│   ├── routes/
-│   ├── utils/               classifyFood.js (edibility rules), notify.js
-│   │                        (Twilio/Firebase/email hooks), expiryJob.js,
-│   │                        tokens.js, seed.js
-│   └── server.js
-└── frontend/
-    └── src/
-        ├── pages/           Landing, Login, Register, DonorDashboard,
-        │                    NGODashboard, RecipientDashboard, AdminDashboard,
-        │                    MapView, ImpactDashboard, Leaderboard
-        ├── components/      Navbar, FoodCard, ProtectedRoute
-        ├── context/         AuthContext
-        └── api/api.js
+backend/
+├── config/db.js
+├── models/         User, FoodListing, Request, Rating, Notification
+├── middleware/     auth (JWT + role guards), upload, errorHandler
+├── controllers/    auth, food, recipient, admin, rating, impact, notification
+├── routes/
+├── utils/          classifyFood.js, notify.js, expiryJob.js, tokens.js, seed.js
+└── server.js
+
+frontend/src/
+├── pages/          Landing, Login, Register, DonorDashboard, NGODashboard,
+│                   RecipientDashboard, AdminDashboard, MapView,
+│                   ImpactDashboard, Leaderboard
+├── components/     Navbar, Footer, FoodCard, NotificationBell, ProtectedRoute
+├── context/        AuthContext
+└── api/            api.js (axios), socket.js (Socket.io client)
 ```
 
-## Setup
+---
 
-### 1. Backend
-
-```bash
-cd backend
-cp .env.example .env      # fill in MONGO_URI at minimum; everything else
-                           # has a dev-mode fallback that logs instead of
-                           # sending real SMS/email/uploads
-npm install
-npm run seed               # creates an admin login (see console output)
-npm run dev                 # http://localhost:5000
-```
-
-Requires a MongoDB instance — either local (`mongod`) or a free
-[MongoDB Atlas](https://www.mongodb.com/atlas) cluster URI.
-
-### 2. Frontend
-
-```bash
-cd frontend
-cp .env.example .env       # add a Google Maps JS API key to enable /map
-npm install
-npm run dev                 # http://localhost:5173
-```
-
-### 3. Try it end-to-end
-
-1. Register as a **donor**, post a listing (classification result shows
-   immediately after posting).
-2. Register as an **NGO** — it starts `pending`. Log in as the seeded admin
-   at `/admin` and approve it.
-3. Log back in as the NGO, accept the listing from `/ngo`, mark picked up,
-   then confirm delivery — this updates the donor's impact stats, points,
-   and badges.
-4. Check `/impact` and `/leaderboard`.
-
-## Core feature → file map
+## Feature → file map
 
 | Feature | Where |
 |---|---|
-| Auto-classification (human/animal/compost) | `backend/utils/classifyFood.js` |
-| Donor listing + photo upload | `backend/controllers/foodController.js`, `frontend/src/pages/DonorDashboard.jsx` |
-| NGO accept / GPS tracking / delivery confirm | `foodController.js` (`acceptListing`, `updateTracking`, `markDelivered`), `NGODashboard.jsx` |
-| NGO verification (admin) | `adminController.js`, `AdminDashboard.jsx` |
-| Notifications (SMS/push/email) | `backend/utils/notify.js` — swap the dev-mode `console.log` branches for real Twilio/Firebase/SMTP calls once you have keys |
+| Food classification (human/animal/compost) | `backend/utils/classifyFood.js` |
+| Listing creation + photo upload | `foodController.js`, `DonorDashboard.jsx` |
+| Accept / GPS tracking / delivery | `foodController.js`, `NGODashboard.jsx` |
+| Recipient needs → NGO fulfillment | `recipientController.js`, `NGODashboard.jsx`, `RecipientDashboard.jsx` |
+| NGO verification | `adminController.js`, `AdminDashboard.jsx` |
+| Real-time notifications | `utils/notify.js`, `api/socket.js`, `NotificationBell.jsx` |
 | Expiry countdown + auto-expire | `backend/utils/expiryJob.js` |
-| Live map | `frontend/src/pages/MapView.jsx` |
-| Ratings | `ratingController.js` |
-| Gamification (points/badges/leaderboard) | `impactController.js`, `Leaderboard.jsx` |
-| Recurring donations | `FoodListing.recurrence` field — see note below |
-| Role-based auth (Donor/NGO/Volunteer/Recipient/Admin) | `middleware/auth.js` |
+| Live map | `MapView.jsx` |
+| Points, badges, leaderboard | `impactController.js`, `Leaderboard.jsx` |
+| Role-based auth (5 roles) | `middleware/auth.js`, `authController.js` |
 
-## What's stubbed / what's next
+---
 
-Built as a working MVP core rather than faking every bullet point. Honest
-status on the harder items:
+## Not built yet
 
-- **Recurring donation scheduling** — the data model (`recurrence` field) and
-  UI toggle are in place, but there's no scheduler actually re-creating the
-  listing daily/weekly yet. Add a `node-cron` job that queries
-  `recurrence.isRecurring: true, recurrence.active: true` listings and clones
-  them at `timeOfDay`.
-- **AI chatbot for WhatsApp/voice posting** — this is a separate service
-  (WhatsApp Business API / Twilio Conversations + an LLM to parse free text
-  into the `FoodListing` schema, then POST to `/api/food`). The API is
-  already shaped to accept that input; the bot itself isn't built here.
-- **Blockchain transparency log** — genuinely optional per the brief. If
-  needed, the cleanest approach is writing a hash of each `delivered` event
-  (donor, quantity, timestamp, recipient) to a low-cost chain (Polygon) or
-  even just a public append-only ledger service, rather than running your
-  own chain.
-- **Multi-language support** — add `react-i18next`, pull strings out of the
-  JSX into locale files. `User.languagePref` already exists on the model to
-  drive it.
-- **Payments for NGO transport funds** — needs a payment gateway (Razorpay
-  for India, given the orphanage/old-age-home framing, or Stripe). Add a
-  `Donation` model + a `/api/donations` route that creates an order and
-  verifies the webhook.
-- **Fraud prevention** — currently just a `fraudFlags` array admins can view.
-  Real fraud detection (fake listings, no-show pickups, rating manipulation)
-  needs a dedicated rules/scoring pass once you have real usage data to
-  tune it against.
-- **SMS/email/push are dev-mode by default** — they log to console until you
-  add Twilio/SMTP/Firebase credentials to `.env`.
+Honest status — these are deliberate next steps, not oversights:
 
-## Security notes before going to production
+- **Recurring donations** — the data model and UI toggle exist, but no
+  scheduler re-creates listings yet. Add a `node-cron` job over
+  `recurrence.isRecurring: true`.
+- **WhatsApp / voice posting bot** — needs a separate service (WhatsApp
+  Business API + an LLM parsing free text into the listing schema, POSTing
+  to `/api/food`). The API is already shaped for it.
+- **Blockchain transparency log** — optional. Simplest version: hash each
+  delivered event and write it to a low-cost chain like Polygon.
+- **Multi-language** — add `react-i18next`; `User.languagePref` already exists.
+- **Payments for NGO transport costs** — needs Razorpay or Stripe plus a
+  `Donation` model and webhook verification.
+- **Real fraud detection** — currently just an admin-visible `fraudFlags`
+  array; meaningful scoring needs real usage data to tune against.
 
-- Rotate `JWT_SECRET` and never commit `.env`.
-- Add rate limiting on `/api/auth/otp/*` (OTP brute-force).
-- Validate file uploads server-side beyond MIME-type (magic-byte check).
-- Add input validation (e.g. `zod` or `joi`) on all controllers — this MVP
-  does minimal manual checks.
-# FoodBridge
+---
+
+## Before production
+
+- Rotate `JWT_SECRET`, never commit `.env`.
+- Rate-limit `/api/auth/otp/*` against brute force.
+- Validate uploads by magic bytes, not just MIME type.
+- Add schema validation (`zod`/`joi`) — controllers do minimal manual checks.
+- Replace the landing page's stock Unsplash images with your own photography.
